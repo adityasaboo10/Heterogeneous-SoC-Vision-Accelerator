@@ -1,4 +1,5 @@
 `timescale 1ns / 1ps
+(* use_dsp = "yes" *)
 
 module PE #(parameter PIXW = 8, 
             parameter Output_Width = 32)(
