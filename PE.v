@@ -3,8 +3,8 @@
 
 module PE #(parameter PIXW = 8, 
             parameter Output_Width = 32)(
-            input clk, 
-            input rst_n,
+            input clk_50M, 
+            input rst,
             input [PIXW-1 :0] a,
             input [PIXW-1 :0] b,
             input [Output_Width-1 :0] c,
@@ -13,8 +13,8 @@ module PE #(parameter PIXW = 8,
             output reg [Output_Width-1 :0] out
     );
     
-always @(posedge clk or negedge rst_n) begin
-    if(!rst_n || !en) begin
+always @(posedge clk_50M or negedge rst) begin
+    if(!rst || !en) begin  //en should be 1 to start computing
         out <= 0;
         done <= 1'b0;
     end
