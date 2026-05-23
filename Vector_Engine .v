@@ -1,4 +1,4 @@
-    //After Enable is set high, delay of 1 clk we will get result on the second clk
+    //After Enable is set high, delay of 1 clk we will get result on the second clk and done is indicated high
     `timescale 1ns / 1ps
     //Each vector engine would get input pixels need for 1 convolution 
     
@@ -18,7 +18,8 @@
                            output done
         );
     wire done_arr [0:(Kernel_size*Kernel_size)-1];
-    assign done = done_arr[0];
+    reg done_pipe;
+    assign done = done_pipe;
     //Wires to hold MAC ouputs 
     wire [Output_Width-1 : 0] mac_outputs [0 : (Kernel_size*Kernel_size)-1];
     genvar row, col;
@@ -49,7 +50,7 @@
     reg [Output_Width-1 : 0] temp_sum;
     integer idx;
     always @(*) begin
-     if(done) begin
+     if(done_arr[0]) begin
         temp_sum = 0; 
         
         // Loop through however many MACs you have based on Kernel_size
@@ -63,9 +64,13 @@
         end
     end
     always @(posedge clk_50M or negedge rst)begin
-        if(!rst) out <= 0;
+        if(!rst) begin
+        out <= 0;
+        done_pipe <= 0;
+        end
         else begin 
-        out <= temp_sum;         
+        out <= temp_sum; 
+        done_pipe <= done_arr[0];         
         end
     end
     endmodule
