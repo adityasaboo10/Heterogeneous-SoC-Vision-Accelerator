@@ -29,15 +29,11 @@ if(!rst) begin
     base_pos <= 0;
     all_strides_done <= 0;
     rd_counter <= 0;
-    reading_active <= 0;
-    ifMAP_flat <= 0;
 end
 else if(!master_start) begin
     base_pos         <= 0;
     all_strides_done <= 0;
     rd_counter       <= 0;
-    reading_active   <= 0;
-    ifMAP_flat       <= 0;
 end
 else begin
     all_strides_done <= 1'b0;
@@ -51,20 +47,30 @@ else begin
                 all_strides_done <= 1'b1;
                 rd_counter       <= 0;
                 base_pos         <= 0;
-                reading_active   <= 1'b0;
         end
     end
     end
 end
 
 always @(*) begin
-    if(rd_start) reading_active <= 1;
-    ifMAP_flat <= 0;
-    case(lb_state)
-        buf1: ifMAP_flat <= {out_pix2, out_pix3, out_pix4};
-        buf2: ifMAP_flat <= {out_pix3, out_pix4, out_pix1};
-        buf3: ifMAP_flat <= {out_pix4, out_pix1, out_pix2};
-        buf4: ifMAP_flat <= {out_pix1, out_pix2, out_pix3};
-    endcase
+    if(!rst) begin
+        reading_active <= 0;
+        ifMAP_flat <= 0;
+    end
+    else if( !master_start) begin
+        reading_active   <= 0;
+        ifMAP_flat       <= 0;
+    end
+    else begin
+        if(rd_start) reading_active <= 1;
+        else if (all_strides_done) reading_active <= 0;
+        ifMAP_flat <= 0;
+        case(lb_state)
+            buf1: ifMAP_flat <= {out_pix2, out_pix3, out_pix4};
+            buf2: ifMAP_flat <= {out_pix3, out_pix4, out_pix1};
+            buf3: ifMAP_flat <= {out_pix4, out_pix1, out_pix2};
+            buf4: ifMAP_flat <= {out_pix1, out_pix2, out_pix3};
+        endcase
+    end
 end
 endmodule
