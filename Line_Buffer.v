@@ -6,10 +6,13 @@ module Line_Buffer #(parameter PIXW = 8, LB_size = 20)
     input [PIXW-1 :0] inp_pix, 
     input write_en,  //comes from AXIcontroller to tell when to write
     input [4:0] base_pos,  //from central controller 
-    output wire [(3 * PIXW)-1:0] out_pix
+    output wire [(3 * PIXW)-1:0] out_pix,
+    output [4:0] pointer_out
     );
     
-reg [PIXW-1 : 0] LB [LB_size-1 : 0];
+assign pointer_out = pointer;
+
+(* ram_style = "block" *) reg [PIXW-1 : 0] LB [LB_size-1 : 0];
 reg [4:0] pointer;  // 5 bits is enough to point to 20 LB cells
 integer i;
 
