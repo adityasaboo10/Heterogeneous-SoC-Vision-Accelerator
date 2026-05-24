@@ -2,7 +2,6 @@ module AXIController #(parameter PIXW = 8,parameter K_size = 3, parameter LB_siz
                  (input clk_50M,
                   input rst,
                   input WVALID1, WVALID2, WVALID3,WVALID4,
-                  input [PIXW-1:0] inp_pix1, inp_pix2, inp_pix3, inp_pix4,
                   input all_strides_done,
                   input master_start,
                   output reg rd_start, 
