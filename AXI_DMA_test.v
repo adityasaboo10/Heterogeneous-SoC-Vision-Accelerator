@@ -1,9 +1,5 @@
 `timescale 1ns / 1ps
 
-
-
-`timescale 1ns / 1ps
-
 module AXI_DMA_test();
 localparam PIXW         = 8;
 localparam Output_Width = 32;
@@ -18,7 +14,8 @@ reg s_axis_tvalid, s_axis_tlast;
 wire s_axis_tready;
 wire [Output_Width-1:0] out;
 
-reg [Output_Width-1:0] out_capture [0:LB_size-1];
+// INCREASED SIZE: 20 slots is too small for multiple rows of convolutions!
+reg [Output_Width-1:0] out_capture [0:199]; 
 integer capture_idx;
 integer i;
 
@@ -51,6 +48,11 @@ initial begin
 
     weights = {9{8'd1}};
     bias    = 0;
+    
+    // Safely initialize the new larger capture array
+    for(i = 0; i < 200; i = i + 1) begin
+        out_capture[i] = 0;
+    end
 
     // release reset
     repeat(2) @(posedge clk_50M); #1;
@@ -62,18 +64,20 @@ initial begin
 
     @(posedge clk_50M); #1;
 
-    // send all 4 rows sequentially
-    // row0: 1..20, row1: 21..40, row2: 41..60, row3: 61..80
-    // tlast only on very last pixel
-    for(i = 0; i < LB_size * 4; i = i + 1) begin
+    // SEND 6 ROWS SEQUENTIALLY (120 pixels)
+    // Rows 1-4 trigger the START state. 
+    // Rows 5-6 will force the state machine deep into the BTW state!
+    for(i = 0; i < LB_size * 6; i = i + 1) begin
         // wait for tready with #1 after clock edge
         @(posedge clk_50M); #1;
         while(!s_axis_tready) begin
             @(posedge clk_50M); #1;
         end
+        
         s_axis_tdata  = i + 1;
         s_axis_tvalid = 1'b1;
-        s_axis_tlast  = (i == LB_size * 4 - 1) ? 1'b1 : 1'b0;
+        // Fire tlast ONLY on the 120th pixel
+        s_axis_tlast  = (i == (LB_size * 6) - 1) ? 1'b1 : 1'b0; 
     end
 
     // deassert after last pixel
@@ -82,8 +86,8 @@ initial begin
     s_axis_tlast  = 1'b0;
     s_axis_tdata  = 0;
 
-    // wait for all convolution outputs to come through
-    repeat(100) @(posedge clk_50M); #1;
+    // Increased wait time: Give the pipeline enough time to drain the final rows
+    repeat(200) @(posedge clk_50M); #1;
 
     $display("--- Convolution Outputs ---");
     for(i = 0; i < capture_idx; i = i + 1)
