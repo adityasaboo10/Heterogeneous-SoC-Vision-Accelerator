@@ -14,7 +14,8 @@ module Pipelining#(parameter PIXW = 8,
                    input [(K_size * K_size * PIXW)-1 : 0] weights,
                    input [(K_size * K_size * Output_Width)-1 : 0] bias,
                    output         s_axis_tready,  // backpressure to DMA
-                   output [Output_Width-1 : 0] out
+                   output [Output_Width-1 : 0] out,
+                   output vec_done_out
     );
 //----------------------------------
 //----------AXI DMA to RTL bridge---
@@ -24,7 +25,7 @@ assign s_axis_tready = ( WREADY1 || WREADY2 || WREADY3 || WREADY4 );
 //----------Line Buffers--------
 wire [(3*PIXW)-1:0] out_pix1, out_pix2, out_pix3, out_pix4;
 wire [4:0] pointer1, pointer2, pointer3, pointer4;
-
+wire [4:0] base_pos;
 
 Line_Buffer LB1 (.clk_50M(clk_50M), .rst(rst), .inp_pix(s_axis_tdata), 
                 .write_en(write_en1), .base_pos(base_pos), .out_pix(out_pix1),
@@ -47,7 +48,6 @@ Line_Buffer LB4 (.clk_50M(clk_50M), .rst(rst), .inp_pix(s_axis_tdata),
 wire rd_start, write_en1, write_en2, write_en3, write_en4; 
 wire [1:0] lb_state;
 wire all_strides_done;
-wire [4:0] base_pos;
 AXIController #(.PIXW(PIXW),. K_size(K_size), . LB_size(Lb_size)) axc(.clk_50M(clk_50M), .rst(rst),
                   .s_axis_tvalid(s_axis_tvalid), .s_axis_tlast(s_axis_tlast), 
                   .all_strides_done(all_strides_done), .master_start(master_start),
@@ -60,6 +60,8 @@ AXIController #(.PIXW(PIXW),. K_size(K_size), . LB_size(Lb_size)) axc(.clk_50M(c
                              
 //--------------------------------
 //-----------Read Controller------
+wire vec_done;
+assign vec_done_out = vec_done;
 wire vec_valid;
 wire [(K_size * K_size * PIXW)-1:0] ifMAP_flat;
 
@@ -71,7 +73,6 @@ ReadController #(.PIXW(PIXW),. K_size(K_size), . LB_size(Lb_size)) rdc (.clk_50M
                    
 //--------------------------------------    
 //--------Vector Engine----------------
-wire vec_done;
 Vector_Engine   #(.PIXW(PIXW),.Output_Width (Output_Width), .Kernel_size(K_size)) VE
                  (.clk_50M(clk_50M), .rst(rst), .en(vec_valid), .ifMAP_flat(ifMAP_flat),
                 .weights(weights), .bias(bias), .out(out), .done(vec_done));
