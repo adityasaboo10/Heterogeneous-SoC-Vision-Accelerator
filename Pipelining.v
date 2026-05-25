@@ -67,7 +67,7 @@ wire [(K_size * K_size * PIXW)-1:0] ifMAP_flat;
 
 ReadController #(.PIXW(PIXW),. K_size(K_size), . LB_size(Lb_size)) rdc (.clk_50M(clk_50M), .rst(rst), .rd_start(rd_start), .lb_state(lb_state),
                    .out_pix1(out_pix1), .out_pix2(out_pix2), .master_start(master_start),
-                   .out_pix3(out_pix3),.out_pix4(out_pix4), .vec_done(vec_done),
+                   .out_pix3(out_pix3),.out_pix4(out_pix4),
                    .all_strides_done(all_strides_done), .base_pos(base_pos),
                    .ifMAP_flat(ifMAP_flat), .vec_valid(vec_valid));
                    
