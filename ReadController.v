@@ -1,4 +1,4 @@
-module ReadController #(parameter PIXW = 8, parameter K_size = 3, parameter LB_size = 20)
+module ReadController #(parameter PIXW = 8, parameter K_size = 3, parameter LB_size = 256)
                  (input clk_50M,
                   input rst,
                   input rd_start,
@@ -6,7 +6,7 @@ module ReadController #(parameter PIXW = 8, parameter K_size = 3, parameter LB_s
                   input [(3*PIXW)-1:0] out_pix1, out_pix2, out_pix3, out_pix4,
                   input master_start,
                   output reg all_strides_done,
-                  output reg [4:0] base_pos,
+                  output reg [7:0] base_pos,
                   output reg [(K_size * K_size * PIXW)-1:0] ifMAP_flat,
                   output vec_valid
                   );
@@ -16,7 +16,7 @@ localparam buf2 = 2'd1;
 localparam buf3 = 2'd2;
 localparam buf4 = 2'd3;
 
-reg [4:0] rd_counter;
+reg [7:0] rd_counter;
 reg reading_active;
 
 assign vec_valid = (rst && master_start) ? reading_active : 1'b0;
