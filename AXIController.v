@@ -1,14 +1,14 @@
 //In the start all 4 LBs fill one by one
     //After that each row fills with new set of pixels
     
-    module AXIController #(parameter PIXW = 8,parameter K_size = 3, parameter LB_size = 20)
+    module AXIController #(parameter PIXW = 8,parameter K_size = 3, parameter LB_size = 256)
                          (input clk_50M,
                           input rst,
                           input s_axis_tvalid,
                           input s_axis_tlast,
                           input all_strides_done,
                           input master_start,
-                          input [4:0] pointer1, pointer2, pointer3, pointer4,
+                          input [7:0] pointer1, pointer2, pointer3, pointer4,
                           output reg rd_start, 
                           output WREADY1, WREADY2, WREADY3, WREADY4,
                           output reg [1:0] lb_state,
