@@ -3,7 +3,7 @@
 module Pipelining#(parameter PIXW = 8, 
                    parameter Output_Width = 32,
                    parameter K_size = 3, //size of kernel is 3x3
-                   parameter Lb_size = 20
+                   parameter Lb_size = 256
                    )(
                    input clk_50M,
                    input rst,
@@ -24,8 +24,8 @@ assign s_axis_tready = ( WREADY1 || WREADY2 || WREADY3 || WREADY4 );
 //--------------------------
 //----------Line Buffers--------
 wire [(3*PIXW)-1:0] out_pix1, out_pix2, out_pix3, out_pix4;
-wire [4:0] pointer1, pointer2, pointer3, pointer4;
-wire [4:0] base_pos;
+wire [7:0] pointer1, pointer2, pointer3, pointer4;
+wire [7:0] base_pos;
 
 Line_Buffer LB1 (.clk_50M(clk_50M), .rst(rst), .inp_pix(s_axis_tdata), 
                 .write_en(write_en1), .base_pos(base_pos), .out_pix(out_pix1),
