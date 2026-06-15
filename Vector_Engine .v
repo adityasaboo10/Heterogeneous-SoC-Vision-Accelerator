@@ -2,7 +2,7 @@
     `timescale 1ns / 1ps
     //Each vector engine would get input pixels need for 1 convolution 
     
-    module Vector_Engine #(parameter PIXW = 8, 
+(* keep_hierarchy = "yes" *) module Vector_Engine #(parameter PIXW = 8, 
                            parameter Output_Width = 32,
                            parameter Kernel_size = 3 //size of kernel is 3x3
                            )(
@@ -14,14 +14,14 @@
                            input [(Kernel_size * Kernel_size * PIXW)-1 : 0] ifMAP_flat,
                            input [(Kernel_size * Kernel_size * PIXW)-1 : 0] weights,
                            input [(Kernel_size * Kernel_size * Output_Width)-1 : 0] bias,
-                           output reg [Output_Width-1 : 0] out,
+                           output reg signed [Output_Width-1 : 0] out,
                            output done
         );
-    wire done_arr [0:(Kernel_size*Kernel_size)-1];
-    reg done_pipe;
+ wire done_arr [0:(Kernel_size*Kernel_size)-1];
+ reg done_pipe;
     assign done = done_pipe;
     //Wires to hold MAC ouputs 
-    wire [Output_Width-1 : 0] mac_outputs [0 : (Kernel_size*Kernel_size)-1];
+    wire signed [Output_Width-1 : 0] mac_outputs [0 : (Kernel_size*Kernel_size)-1];
     genvar row, col;
     
     generate 
@@ -47,7 +47,7 @@
     end
     endgenerate
     
-    reg [Output_Width-1 : 0] temp_sum;
+    reg signed [Output_Width-1 : 0] temp_sum;
     integer idx;
     always @(*) begin
      if(done_arr[0]) begin
