@@ -189,7 +189,9 @@ The immediate next step is evolving this architecture from a single-filter featu
 
 ![FPGA BRAM Pre-alloc](images/fpga_bram_prealloc.jpeg)
 
-### Resource Utilization Report
-*Vivado utilization summary showing LUT and BRAM breakdown post-implementation.*
+## Resource Utilization Report
+### Without Bram
+![UNOPTIMIZED](images/unoptimized.jpeg)
 
-![Resource Utilization](images/resource_utilization.png)
+### With Bram
+![OPTIMIZED](images/optimized.jpeg)
