@@ -66,6 +66,19 @@ Responsible for image acquisition and preprocessing via OpenCV, kernel definitio
 **2. The Hardware Accelerator (Programmable Logic / Verilog)**
 Responsible for all pixel-level computation. The key hardware subsystems are described below.
 
+### Data Flow
+
+```mermaid
+graph TD
+    A[Python / OpenCV\nImage Load & Resize] --> B[AXI4-Lite\nKernel & Resolution Config]
+    B --> C[AXI4-Stream DMA\nImage Burst Transfer]
+    C --> D[Line Buffer\n4-Buffer Strategy / BRAM]
+    D --> E[3×3 Convolution Engine\n9 DSP Slices — Signed]
+    E --> F[AXI4-Lite TLAST Wrapper\nPixel Counter]
+    F --> G[DMA Result Transfer\nBack to DDR]
+    G --> H[Python\nOutput Display / Save]
+```
+
 ---
 
 ### The 4-Buffer "Zero Downtime" Line Buffer Strategy
@@ -98,7 +111,7 @@ The initial hardware datapath was strictly unsigned, which prevented direct appl
 | Version | Key Change |
 |---------|-----------|
 | **V2.0** — Native Signed Arithmetic | Rewrote the convolution datapath to support signed multiplication and accumulation natively, eliminating the two-pass software workaround entirely. Signed edge-detection kernels now run in a single hardware pass. |
-| **V2.1** — BRAM Line Buffers | Migrated line buffers from distributed LUT-RAM to Block RAM primitives. LUT count dropped from 12,360 to 4,839 while adding only 5 BRAM units. Throughput and timing were unaffected. |
+| **V2.1** — BRAM Line Buffers | Migrated line buffers from distributed LUT-RAM to Block RAM primitives. LUT count dropped from 12,360 to 4,839 while adding only 5 BRAM units. Throughput and timing were unaffected. See `Line_Buffer_Bram.v`. |
 | **V2.2** — Pre-Allocated DMA Buffers | Moved `allocate()` calls for DMA-contiguous memory out of the convolution function and into global scope. Buffers are claimed once at startup; subsequent calls use `np.copyto()` to overwrite in place. This eliminated repeated Linux memory-manager overhead from the critical path, cutting full system time from ~14ms to ~8.2ms. |
 
 ---
@@ -164,14 +177,19 @@ The immediate next step is evolving this architecture from a single-filter featu
 ### Benchmark 1 — CPU Baseline
 *Pure software convolution on the ARM Cortex-A9: 53.47ms, 18.7 FPS.*
 
-![CPU Baseline](images/cpu_baseline.png)
+![CPU Baseline](images/cpu_baseline.jpeg)
 
 ### Benchmark 2 — FPGA Unsigned / Signed (No BRAM)
 *Hardware accelerated, single-pass. HW latency 2.23ms, full system 14.01ms, 71.4 FPS.*
 
-![FPGA No BRAM](images/fpga_no_bram.png)
+![FPGA No BRAM](images/fpga_no_bram.jpeg)
 
 ### Benchmark 3 — FPGA Signed + BRAM + Pre-Allocated DMA
 *Best configuration. HW latency 2.26ms, full system 8.20ms, 122.0 FPS.*
 
-![FPGA BRAM Pre-alloc](images/fpga_bram_prealloc.png)
+![FPGA BRAM Pre-alloc](images/fpga_bram_prealloc.jpeg)
+
+### Resource Utilization Report
+*Vivado utilization summary showing LUT and BRAM breakdown post-implementation.*
+
+![Resource Utilization](images/resource_utilization.png)
