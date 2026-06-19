@@ -190,8 +190,8 @@ The immediate next step is evolving this architecture from a single-filter featu
 ![FPGA BRAM Pre-alloc](images/fpga_bram_prealloc.jpeg)
 
 ## Resource Utilization Report
-### Without Bram
+### Line Buffers based on LUT-RAM
 ![UNOPTIMIZED](images/unoptimized.jpeg)
 
-### With Bram
+### Line Buffers based on BRAM
 ![OPTIMIZED](images/optimized.jpeg)
