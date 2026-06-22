@@ -157,8 +157,8 @@ Three configurations were benchmarked against the same input image to quantify t
 
 | Version | LUTs | Flip-Flops | BRAM | DSP Slices |
 |---------|------|------------|------|------------|
-| V1.x / V2.0 (LUT-RAM) | 12,360 | — | 0 | 9 |
-| V2.1+ (BRAM) | 4,839 | — | 5 | 9 |
+| V1.x / V2.0 (LUT-RAM) | 12,360 | — | 5 | 9 |
+| V2.1+ (BRAM) | 4,839 | — | 11 | 9 |
 
 ---
 
