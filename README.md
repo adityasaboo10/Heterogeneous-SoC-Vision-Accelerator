@@ -9,93 +9,131 @@ The accelerator leverages a highly pipelined Verilog datapath to execute 2D conv
 ---
 
 ## Table of Contents
-1. [Key Features](#key-features)
-2. [Tech Stack & Materials](#tech-stack--materials)
-3. [System Architecture](#system-architecture)
-4. [Implementation Phases](#implementation-phases)
-5. [Challenges & Solutions](#challenges--solutions)
-6. [Usage & Benchmarks](#usage--benchmarks)
-7. [Future Scope: CNN Restoration](#future-scope-cnn-image-restoration)
-8. [Gallery](#gallery)
+- [Key Features](#key-features)
+- [Architecture](#architecture)
+- [Data Flow](#data-flow)
+- [Implementation Timeline](#implementation-timeline)
+- [Challenges & Solutions](#challenges--solutions)
+- [Results/Benchmarks](#resultsbenchmarks)
+- [Resource Utilization](#resource-utilization)
+- [Future Scope: CNN Restoration](#future-scope-cnn-restoration)
+- [Setup & Usage](#setup--usage)
 
 ---
 
 ## Key Features
 
 - **CPU-Bypassing DMA Pipeline:** Instead of forcing the ARM processor to transfer image pixels sequentially — a significant bottleneck — the system implements a Direct Memory Access (DMA) highway via AXI4-Stream. This allows the entire image to be streamed from DDR memory directly into the custom silicon in one continuous burst, completely freeing the CPU for other tasks during hardware execution.
-
 - **True Reprogrammable SoC Design:** The system is not locked to a single operation. By exposing control registers through memory-mapped AXI4-Lite interfaces and a Python orchestration layer, the active convolution kernel (e.g., Blur, Laplacian, Sobel) and the target image resolution can both be swapped dynamically at runtime — without re-synthesizing or re-flashing the bitstream.
-
-- **Push-Button Pipelined Execution:** The hardware datapath functions as a continuous, high-speed assembly line. Once the software writes the configuration registers, a single "master start" command in Python triggers autonomous hardware execution. From that point forward, the accelerator processes a new pixel on every rising clock edge without any further CPU involvement.
-
-- **Native Signed Arithmetic:** The final hardware datapath implements full signed convolution natively in silicon, enabling direct application of edge-detection kernels (Laplacian, Sobel) without any software decomposition or multi-pass workarounds.
-
-- **BRAM-Based Line Buffer Optimization:** Line buffers were migrated from distributed LUT-RAM to dedicated Block RAM (BRAM) primitives. This reduced LUT utilization from 12,360 to 4,839 while consuming only 5 BRAM units — freeing over 7,500 LUTs for future logic without any impact on throughput or timing.
-
-- **Zero-Overhead DMA Memory Management:** DMA-contiguous buffers are allocated once at startup in global scope rather than inside the convolution function. This eliminates repeated OS-level memory requests from the hot path, removing up to 25ms of Linux kernel overhead per call and delivering true bare-metal throughput from Python.
+- **Push-Button Pipelined Execution:** The hardware datapath functions as a continuous, high-speed assembly line. Once the software writes the configuration registers, a single "master start" command in Python triggers autonomous hardware execution.
+- **Native Signed Arithmetic:** The hardware datapath implements full signed convolution natively in silicon, enabling direct application of edge-detection kernels without any software decomposition or multi-pass workarounds.
+- **Zero-Overhead DMA Memory Management:** DMA-contiguous buffers are allocated once at startup in global scope. The hot path utilizes `np.copyto()` for zero-overhead buffer reuse, eliminating repeated OS-level memory requests and removing up to 25ms of Linux kernel overhead per call, delivering bare-metal throughput from Python.
 
 ---
 
-## Tech Stack & Materials
-
-### Hardware
-| Component | Details |
-|-----------|---------|
-| **Target Board** | Xilinx Pynq Z2 |
-| **Processing System (PS)** | ARM Cortex-A9 — runs Python orchestration layer |
-| **Programmable Logic (PL)** | Custom Verilog datapath — 9 DSP slices, 4,839 LUTs, 5 BRAMs |
-| **High-Throughput Bus** | AXI4-Stream — DMA image transfers |
-| **Control Bus** | AXI4-Lite — memory-mapped configuration registers |
-
-### Software & Tools
-| Category | Tools |
-|----------|-------|
-| **RTL Design** | Xilinx Vivado (Verilog + Block Design) |
-| **Software Stack** | PYNQ Framework (Jupyter Notebooks) |
-| **Libraries** | Python, NumPy, OpenCV, Matplotlib |
-
----
-
-## System Architecture
+## Architecture
 
 The system partitions its workload across two compute domains:
 
 **1. The Software Orchestrator (ARM Cortex-A9 / Python)**
-Responsible for image acquisition and preprocessing via OpenCV, kernel definition, AXI-Lite register configuration, DMA transaction management, and interrupt handling.
+Responsible for image acquisition and preprocessing via OpenCV, kernel definition, AXI-Lite register configuration, global DMA transaction management, and interrupt handling.
 
 **2. The Hardware Accelerator (Programmable Logic / Verilog)**
-Responsible for all pixel-level computation. The key hardware subsystems are described below.
+Responsible for all pixel-level computation. It comprises AXI controllers, line buffers, processing elements (DSP slices), and flow-control logic.
 
-### Data Flow
+### Hardware Module Hierarchy
+The custom Verilog design is structured hierarchically. The testbench drives the `Pipelining.v` datapath, which instantiates the individual control and math modules.
 
 ```mermaid
 graph TD
-    A[Python / OpenCV\nImage Load & Resize] --> B[AXI4-Lite\nKernel & Resolution Config]
-    B --> C[AXI4-Stream DMA\nImage Burst Transfer]
-    C --> D[Line Buffer\n4-Buffer Strategy / BRAM]
-    D --> E[3×3 Convolution Engine\n9 DSP Slices — Signed]
-    E --> F[AXI4-Lite TLAST Wrapper\nPixel Counter]
-    F --> G[DMA Result Transfer\nBack to DDR]
-    G --> H[Python\nOutput Display / Save]
+    top[Testbenches<br/>top_test.v / AXI_DMA_test.v] --> PL[Pipelining.v<br/>Top Datapath]
+    PL --> AC[AXIController.v<br/>FSM & DMA Write Handshake]
+    PL --> LB[Line Buffers<br/>Line_Buffer.v / Line_buffer_bram.v]
+    PL --> RC[ReadController.v<br/>Stride Control & Window Flattening]
+    PL --> VE[Vector_Engine.v<br/>Convolution Engine]
+    VE --> PE[PE.v<br/>DSP Processing Elements]
+    
+    subgraph TLAST Generation
+    OW[AXIS_Output_Wrapper.v<br/>Dynamic Resolution Support]
+    end
 ```
 
 ---
 
-### The 4-Buffer "Zero Downtime" Line Buffer Strategy
-Applying a 3×3 convolution kernel requires simultaneous access to three consecutive image rows. A naive three-buffer design would force the math engine to stall every time a new row is loaded. To eliminate this bottleneck, the design uses **four line buffers**. While the Vector Engine actively consumes data from three buffers, the fourth buffer silently pre-fetches the next image row in the background. This double-buffering strategy completely hides load latency and guarantees the DSP pipeline is never starved for data.
+## Data Flow
 
-### Smart Traffic Control — The Read Controller
-A custom Read Controller FSM acts as a flow-control arbiter between the incoming AXI-Stream and the Vector Engine. It implements a bidirectional handshake: if memory cannot deliver data fast enough, the math engine is held in a safe paused state; if the math engine lags, the incoming stream is held via AXI backpressure. This continuous handshake ensures no pixels are dropped or corrupted, even under transient system load.
+### High-Level System Data Flow
+The overarching data flow traces a path from Python space through the hardware and back, utilizing both memory-mapped (AXI4-Lite) and streaming (AXI4-Stream) interfaces.
 
-### Dynamic Image Resizing — The AXI4-Lite TLAST Wrapper
-Standard hardware accelerators are typically hardcoded to a single fixed image resolution, requiring re-synthesis to change. The `AXIS_Output_Wrapper.v` module solves this by reading a `TOTAL_PIXELS` register written by Python over AXI4-Lite at runtime. The wrapper autonomously counts the pixel stream and asserts the AXI `TLAST` signal at the correct boundary, signaling end-of-frame to the DMA. This allows the same bitstream to process a 256×256 image one run and a 1080p frame the next, with no hardware changes.
+```mermaid
+graph TD
+    A[Python / OpenCV<br/>Image Load & Resize] --> B[AXI4-Lite<br/>Kernel & Resolution Config]
+    B --> C[AXI4-Stream DMA<br/>Image Burst Transfer]
+    C --> D[Line Buffers<br/>4-Buffer Strategy]
+    D --> E[3×3 Convolution Engine<br/>9 DSP Slices — Signed]
+    E --> F[AXI4-Lite TLAST Wrapper<br/>Pixel Counter]
+    F --> G[DMA Result Transfer<br/>Back to DDR]
+    G --> H[Python<br/>Output Display / Save]
+```
 
-### Software Compensation for Hardware Limits (V1.x)
-The initial hardware datapath was strictly unsigned, which prevented direct application of signed convolution kernels (required for edge detection). Rather than discarding the working silicon, a **Kernel Decomposition** technique was implemented in Python: any signed kernel is mathematically split into two strictly positive sub-kernels. The hardware runs twice — once per sub-kernel — and the results are subtracted in software to reconstruct the correct signed output. This workaround delivered full edge detection capability without modifying the RTL. Native signed arithmetic was subsequently implemented in V2.0.
+### The 4-Buffer "Zero Downtime" Strategy
+Applying a 3×3 convolution kernel requires simultaneous access to three consecutive image rows. To eliminate stalling when loading a new row, the design uses **four line buffers**. While the Vector Engine actively consumes data from three buffers, the fourth buffer silently pre-fetches the next image row via AXI-Stream. This double-buffering strategy completely hides load latency.
+
+```mermaid
+graph LR
+    subgraph AXI-Stream Input
+        In[Incoming Stream<br/>Row N+3]
+    end
+
+    subgraph 4-Line Buffer Array
+        LB1[Line Buffer 1<br/>Row N]
+        LB2[Line Buffer 2<br/>Row N+1]
+        LB3[Line Buffer 3<br/>Row N+2]
+        LB4[Line Buffer 4<br/>Writing]
+    end
+
+    subgraph Math Engine
+        VE[3x3 Vector Engine]
+    end
+
+    In -->|Background Load| LB4
+    LB1 -->|Read Port| VE
+    LB2 -->|Read Port| VE
+    LB3 -->|Read Port| VE
+    
+    style LB4 stroke:#333,stroke-width:2px,stroke-dasharray: 5 5
+```
+
+### Smart Traffic Control Handshake
+The `ReadController.v` Acts as a flow-control arbiter. It initiates reads when `rd_start` is triggered by the AXI controller, feeds flattened 3x3 pixel windows (`ifMAP_flat`) to the Vector Engine, and signals when a full stride (row) is completed to manage AXI backpressure.
+
+```mermaid
+sequenceDiagram
+    participant DMA as AXI-Stream (DMA)
+    participant AC as AXIController
+    participant LB as Line Buffers
+    participant RC as ReadController
+    participant VE as Vector Engine
+
+    Note over DMA, AC: Data streamed per row
+    AC->>LB: write_en (buffer 1..4)
+    AC->>RC: rd_start (when 3 rows ready)
+    activate RC
+    RC->>VE: vec_valid = 1
+    loop Every Pixel (Stride)
+        RC->>LB: base_pos (Read Address)
+        LB-->>RC: out_pix1, out_pix2, out_pix3
+        RC->>VE: ifMAP_flat (3x3 Flattened Window)
+        Note over VE: Computes convolution
+    end
+    RC->>AC: all_strides_done = 1
+    deactivate RC
+    AC->>DMA: s_axis_tready (Backpressure management)
+```
 
 ---
 
-## Implementation Phases
+## Implementation Timeline
 
 ### V1.x — Hardware-Software Co-Design (Two-Pass Compensation)
 *Initial version featured an optimized but strictly unsigned hardware datapath.*
@@ -110,9 +148,9 @@ The initial hardware datapath was strictly unsigned, which prevented direct appl
 
 | Version | Key Change |
 |---------|-----------|
-| **V2.0** — Native Signed Arithmetic | Rewrote the convolution datapath to support signed multiplication and accumulation natively, eliminating the two-pass software workaround entirely. Signed edge-detection kernels now run in a single hardware pass. |
-| **V2.1** — BRAM Line Buffers | Migrated line buffers from distributed LUT-RAM to Block RAM primitives. LUT count dropped from 12,360 to 4,839 while adding only 5 BRAM units. Throughput and timing were unaffected. See `Line_Buffer_Bram.v`. |
-| **V2.2** — Pre-Allocated DMA Buffers | Moved `allocate()` calls for DMA-contiguous memory out of the convolution function and into global scope. Buffers are claimed once at startup; subsequent calls use `np.copyto()` to overwrite in place. This eliminated repeated Linux memory-manager overhead from the critical path, cutting full system time from ~14ms to ~8.2ms. |
+| **V2.0** — Native Signed Arithmetic | Rewrote the convolution datapath to support signed multiplication and accumulation natively. Signed edge-detection kernels now run in a single hardware pass. |
+| **V2.1** — BRAM Line Buffers | Migrated line buffers from distributed LUT-RAM to Block RAM primitives. |
+| **V2.2** — Pre-Allocated DMA Buffers | Moved `allocate()` calls for DMA-contiguous memory out of the convolution function and into global scope for zero-overhead buffer reuse via `np.copyto()`. |
 
 ---
 
@@ -124,45 +162,66 @@ The initial hardware datapath was strictly unsigned, which prevented direct appl
 | **Vivado Dead Code Elimination** | Widened FSM state pointers from 5-bit to 8-bit, providing enough address space to prevent the synthesizer from pruning logic paths as unreachable. |
 | **Unsigned Silicon with Signed Kernels** | Implemented mathematical kernel decomposition in Python to split signed matrices into positive sub-kernels, running two hardware passes and recombining in software (V1.x). Replaced entirely with native signed arithmetic in V2.0. |
 | **DSP Pipeline Starvation** | Adopted a 4-buffer line buffer strategy, hiding row-load latency behind active computation to keep the DSP pipeline continuously fed. |
-| **Fixed-Resolution Hardware** | Designed the AXI4-Lite TLAST Wrapper to read a software-defined pixel count at runtime, making the accelerator resolution-agnostic without re-synthesis. |
-| **High LUT Utilization** | Replaced distributed LUT-based line buffers with dedicated BRAM primitives, reducing LUT count from 12,360 to 4,839 at the cost of only 5 BRAM blocks. |
-| **OS Overhead in DMA Transfers** | Moved DMA buffer allocation to global scope so Linux memory management is invoked exactly once at startup. The hot path now uses `np.copyto()` for zero-overhead buffer reuse, cutting full system latency from ~14ms to ~8.2ms. |
+| **High LUT Utilization** | Replaced distributed LUT-based line buffers with dedicated BRAM primitives, slashing LUT usage significantly. |
+| **OS Overhead in DMA Transfers** | Moved DMA buffer allocation to global scope so Linux memory management is invoked exactly once at startup. The hot path now uses `np.copyto()`. |
 
 ---
 
-## Usage & Benchmarks
+## Results/Benchmarks
 
-### Setup
-1. Flash `design_1.bit` and `design_1.hwh` to the Zynq board via the PYNQ web interface.
-2. Open the provided Jupyter Notebook on the board.
-3. Define a 3×3 convolution kernel (e.g., Gaussian Blur, Laplacian Edge Detection, Sobel).
-4. Load a grayscale image and stream it through the AXI DMA using the notebook cells.
-
-### Performance Benchmark (256×256 Grayscale Image — Laplacian Edge Detection)
-
-Three configurations were benchmarked against the same input image to quantify the impact of each optimization stage.
+Three configurations were benchmarked against a 256×256 grayscale image (using a Laplacian Edge Detection kernel) to quantify the impact of each optimization stage.
 
 | Configuration | HW Latency | Full System Time | FPS |
 |---------------|-----------|-----------------|-----|
-| **CPU Baseline** (pure NumPy convolution) | — | 53.47 ms | 18.7 |
-| **FPGA — Unsigned / Signed, no BRAM** | 2.23 ms | 14.01 ms | 71.4 |
-| **FPGA — Signed + BRAM + Pre-alloc DMA** | 2.26 ms | 8.20 ms | **122.0** |
+| **CPU Baseline** (NumPy convolution) | — | 53.47 ms | 18.7 |
+| **FPGA — No BRAM** | 2.23 ms | 14.01 ms | 71.4 |
+| **FPGA — BRAM + Pre-alloc DMA** | 2.26 ms | 8.20 ms | **122.0** |
 
-**Key takeaways:**
-- The FPGA hardware kernel itself runs in ~2.26ms across all FPGA configurations — the silicon compute time is already optimal.
-- The jump from 71.4 to 122.0 FPS is entirely a **software driver improvement**: eliminating repeated OS memory allocation from the convolution call removed ~5.8ms of Linux kernel overhead per frame.
-- BRAM migration had no effect on latency but reduced LUT utilization by **61%** (12,360 → 4,839 LUTs), freeing headroom for deeper future pipelines.
+### 1. CPU Baseline
+**18.7 FPS (53.47ms full system time)**
+*This is the pure software convolution baseline executed on the ARM Cortex-A9 processor. The sequential nature of the CPU makes pixel-by-pixel operations a major bottleneck.*
 
-### Resource Utilization
+![CPU Baseline](images/cpu_baseline.jpeg)
+<br>
+
+### 2. FPGA Unsigned / Signed (No BRAM)
+**71.4 FPS (2.23ms HW latency, 14.01ms full system time)**
+*Moving the math to the FPGA immediately dropped the computation time to a near-optimal ~2.23ms. However, overall FPS was held back by software driver overhead, specifically Linux re-allocating physical memory blocks on every single function call.*
+
+![FPGA No BRAM](images/fpga_no_bram.jpeg)
+<br>
+
+### 3. FPGA Signed + BRAM + Pre-Allocated DMA
+**122.0 FPS (2.26ms HW latency, 8.20ms full system time)**
+*The hardware compute time (2.26ms) remained identical, proving the silicon was already optimal. The massive jump from 71.4 to 122 FPS is entirely due to the software optimization: pre-allocating the DMA buffers globally and reusing them with `np.copyto()`, stripping away ~5.8ms of OS overhead per frame.*
+
+![FPGA BRAM Pre-alloc](images/fpga_bram_prealloc.jpeg)
+
+---
+
+## Resource Utilization
+
+Migrating the line buffers from distributed LUT-RAM to Block RAM (BRAM) primitives (`Line_buffer_bram.v`) had no impact on throughput or timing, but dramatically reduced the logic footprint of the accelerator.
 
 | Version | LUTs | Flip-Flops | BRAM | DSP Slices |
 |---------|------|------------|------|------------|
 | V1.x / V2.0 (LUT-RAM) | 12,360 | — | 5 | 9 |
-| V2.1+ (BRAM) | 4,839 | — | 11 | 9 |
+| V2.1+ (BRAM) | **4,839** | — | 11 | 9 |
+
+### Before Optimization (LUT-RAM)
+*High LUT usage (12,360) left very little logic headroom on the Pynq Z2 for deeper pipelines or additional neural network layers.*
+
+![UNOPTIMIZED](images/unoptimized.jpeg)
+<br>
+
+### After Optimization (BRAM)
+*LUT count dropped by **61%** (down to 4,839) at the cost of only 6 additional BRAM units, freeing over 7,500 LUTs for future scalability.*
+
+![OPTIMIZED](images/optimized.jpeg)
 
 ---
 
-## Future Scope: CNN Image Restoration
+## Future Scope: CNN Restoration
 
 The immediate next step is evolving this architecture from a single-filter feature extractor into a full **End-to-End Edge AI Inference System**.
 
@@ -172,26 +231,9 @@ The immediate next step is evolving this architecture from a single-filter featu
 
 ---
 
-## Gallery
+## Setup & Usage
 
-### Benchmark 1 — CPU Baseline
-*Pure software convolution on the ARM Cortex-A9: 53.47ms, 18.7 FPS.*
-
-![CPU Baseline](images/cpu_baseline.jpeg)
-
-### Benchmark 2 — FPGA Unsigned / Signed (No BRAM)
-*Hardware accelerated, single-pass. HW latency 2.23ms, full system 14.01ms, 71.4 FPS.*
-
-![FPGA No BRAM](images/fpga_no_bram.jpeg)
-
-### Benchmark 3 — FPGA Signed + BRAM + Pre-Allocated DMA
-*Best configuration. HW latency 2.26ms, full system 8.20ms, 122.0 FPS.*
-
-![FPGA BRAM Pre-alloc](images/fpga_bram_prealloc.jpeg)
-
-## Resource Utilization Report
-### Line Buffers implemented using LUT-RAM
-![UNOPTIMIZED](images/unoptimized.jpeg)
-
-### Line Buffers implemented using BRAM
-![OPTIMIZED](images/optimized.jpeg)
+1. Flash `design_1.bit` and `design_1.hwh` to the Zynq board via the PYNQ web interface.
+2. Open the provided Jupyter Notebook (`SOC_test_256x256.py` or similar) on the board.
+3. Define a 3×3 convolution kernel via the memory-mapped registers (e.g., Gaussian Blur, Laplacian Edge Detection, Sobel).
+4. Load a grayscale image and stream it through the AXI DMA using the Python orchestration layer.
